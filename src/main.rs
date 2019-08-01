@@ -9,19 +9,19 @@ enum ParseError {
 }
 
 
-enum Command {
+enum BFCommand {
     IncDataPtr,
     DecDataPtr,
     Inc,
     Dec,
     Read,
     Write,
-    Loop(Program),
+    Loop(BFProgram),
 }
 
 
-struct Program {
-    instructions: Vec<Command>
+struct BFProgram {
+    instructions: Vec<BFCommand>
 }
 
 
@@ -31,28 +31,28 @@ struct Machine {
 }
 
 
-impl Program {
-    fn new() -> Program {
-        Program { instructions: Vec::new() }
+impl BFProgram {
+    fn new() -> BFProgram {
+        BFProgram { instructions: Vec::new() }
     }
 
-    fn parse(code: &str) -> Result<Program, ParseError> {
+    fn parse(code: &str) -> Result<BFProgram, ParseError> {
         let mut programs = Vec::new();
-        programs.push(Program::new());
+        programs.push(BFProgram::new());
 
         for c in code.chars() {
             let p = programs.last_mut().unwrap();
             match c {
-                '>' => p.instructions.push(Command::IncDataPtr),
-                '<' => p.instructions.push(Command::DecDataPtr),
-                '+' => p.instructions.push(Command::Inc),
-                '-' => p.instructions.push(Command::Dec),
-                '.' => p.instructions.push(Command::Write),
-                ',' => p.instructions.push(Command::Read),
-                '[' => programs.push(Program::new()),
+                '>' => p.instructions.push(BFCommand::IncDataPtr),
+                '<' => p.instructions.push(BFCommand::DecDataPtr),
+                '+' => p.instructions.push(BFCommand::Inc),
+                '-' => p.instructions.push(BFCommand::Dec),
+                '.' => p.instructions.push(BFCommand::Write),
+                ',' => p.instructions.push(BFCommand::Read),
+                '[' => programs.push(BFProgram::new()),
                 ']' => {
                     let loop_body = programs.pop().unwrap();
-                    programs.last_mut().unwrap().instructions.push(Command::Loop(loop_body));
+                    programs.last_mut().unwrap().instructions.push(BFCommand::Loop(loop_body));
                 }
                 _  => {}
             };
@@ -71,23 +71,23 @@ impl Machine {
         }
     }
 
-    fn run(self: &mut Machine, program: &Program) -> io::Result<()> {
+    fn run(self: &mut Machine, program: &BFProgram) -> io::Result<()> {
         for inst in &program.instructions {
             match inst {
-                Command::IncDataPtr => self.data_ptr += 1,
-                Command::DecDataPtr => self.data_ptr -= 1,
-                Command::Inc => self.memory[self.data_ptr] += 1,
-                Command::Dec => self.memory[self.data_ptr] -= 1,
-                Command::Write => {
+                BFCommand::IncDataPtr => self.data_ptr += 1,
+                BFCommand::DecDataPtr => self.data_ptr -= 1,
+                BFCommand::Inc => self.memory[self.data_ptr] += 1,
+                BFCommand::Dec => self.memory[self.data_ptr] -= 1,
+                BFCommand::Write => {
                     io::stdout().write(&[self.memory[self.data_ptr]])?;
                     io::stdout().flush()?;
                 },
-                Command::Read => {
+                BFCommand::Read => {
                     let mut buf = vec![0];
                     io::stdin().read(&mut buf)?;
                     self.memory[self.data_ptr] = buf[0];
                 },
-                Command::Loop(body) => {
+                BFCommand::Loop(body) => {
                     while self.memory[self.data_ptr] != 0 {
                         self.run(&body)?;
                     }
@@ -113,7 +113,7 @@ fn main() {
         Ok(s) => s
     };
 
-    match Program::parse(&code) {
+    match BFProgram::parse(&code) {
         Err(_) => return,
         Ok(program) => {
             let mut machine = Machine::new(65536);
