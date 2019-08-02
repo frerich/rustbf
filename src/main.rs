@@ -80,7 +80,6 @@ impl Machine {
                 BFCommand::Dec => self.memory[self.data_ptr] -= 1,
                 BFCommand::Write => {
                     io::stdout().write(&[self.memory[self.data_ptr]])?;
-                    io::stdout().flush()?;
                 },
                 BFCommand::Read => {
                     let mut buf = vec![0];
