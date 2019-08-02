@@ -26,6 +26,7 @@ enum BFPCommand {
     Update(MachineDelta),
     Multiply(HashMap<i32, i8>),
     Loop(BFPProgram),
+    ScanZero(isize),
     Read,
     Write
 }
@@ -133,10 +134,18 @@ impl BFPProgram {
                     }
 
                     let optimized_body = BFPProgram::compile(body);
-                    if let [BFPCommand::Update(MachineDelta { memory, data_ptr: 0 })] = optimized_body.instructions.as_slice() {
-                        result.instructions.push(BFPCommand::Multiply(memory.into_iter().filter(|&(k, _)| *k != 0).map(|(k,v)| (*k,*v)).collect()));
-                    } else {
-                        result.instructions.push(BFPCommand::Loop(optimized_body));
+                    match optimized_body.instructions.as_slice() {
+                        [BFPCommand::Update(MachineDelta { memory, data_ptr: 0 })] =>
+                            result.instructions.push(BFPCommand::Multiply(memory.into_iter().filter(|&(k, _)| *k != 0).map(|(k,v)| (*k,*v)).collect())),
+                        [BFPCommand::Update(MachineDelta { memory, data_ptr })] => {
+                            if memory.is_empty() && *data_ptr != 0 {
+                                result.instructions.push(BFPCommand::ScanZero(*data_ptr));
+                            } else {
+                                result.instructions.push(BFPCommand::Loop(optimized_body));
+                            }
+                        },
+                        _ =>
+                            result.instructions.push(BFPCommand::Loop(optimized_body)),
                     }
                 },
             }
@@ -223,6 +232,14 @@ impl Machine {
         Ok(())
     }
 
+    fn run_bfp_scanzero(self: &mut Machine, step: isize) {
+        let mut data_ptr = self.data_ptr as isize;
+        while self.memory[data_ptr as usize] != 0 {
+            data_ptr += step;
+        }
+        self.data_ptr = data_ptr as usize;
+    }
+
     fn run_optimized(self: &mut Machine, program: &BFPProgram) -> io::Result<()> {
         for inst in &program.instructions {
             match inst {
@@ -237,6 +254,7 @@ impl Machine {
                     self.memory[self.data_ptr] = buf[0];
                 },
                 BFPCommand::Loop(body) => self.run_bfp_loop(body)?,
+                BFPCommand::ScanZero(step) => self.run_bfp_scanzero(*step),
             }
         }
         Ok(())
