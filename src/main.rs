@@ -24,7 +24,7 @@ enum BFCommand {
 #[derive(Debug)]
 enum BFPCommand {
     Update(MachineDelta),
-    Multiply(HashMap<i32, i8>),
+    Multiply(Vec<(i32, i8)>),
     Loop(BFPProgram),
     ScanZero(isize),
     Read,
@@ -45,7 +45,7 @@ struct BFPProgram {
 
 #[derive(Debug)]
 struct MachineDelta {
-    memory: HashMap<i32, i8>,
+    memory: Vec<(i32, i8)>,
     data_ptr: isize
 }
 
@@ -58,7 +58,7 @@ struct Machine {
 
 impl MachineDelta {
     fn new() -> MachineDelta {
-        MachineDelta { memory: HashMap::new(), data_ptr: 0 }
+        MachineDelta { memory: Vec::new(), data_ptr: 0 }
     }
 
     fn is_empty(self: &MachineDelta) -> bool {
@@ -106,31 +106,38 @@ impl BFPProgram {
 
     fn compile(program: &BFProgram) -> BFPProgram {
         let mut result = BFPProgram::new();
-        let mut current_delta = MachineDelta::new();
+        let mut machine_delta = MachineDelta::new();
+        let mut memory_delta: HashMap<i32, i8> = HashMap::new();
         for inst in &program.instructions {
             match inst {
-                BFCommand::IncDataPtr => current_delta.data_ptr += 1,
-                BFCommand::DecDataPtr => current_delta.data_ptr -= 1,
-                BFCommand::Inc => *current_delta.memory.entry(current_delta.data_ptr as i32).or_insert(0) += 1,
-                BFCommand::Dec => *current_delta.memory.entry(current_delta.data_ptr as i32).or_insert(0) -= 1,
+                BFCommand::IncDataPtr => machine_delta.data_ptr += 1,
+                BFCommand::DecDataPtr => machine_delta.data_ptr -= 1,
+                BFCommand::Inc => *memory_delta.entry(machine_delta.data_ptr as i32).or_insert(0) += 1,
+                BFCommand::Dec => *memory_delta.entry(machine_delta.data_ptr as i32).or_insert(0) -= 1,
                 BFCommand::Write => {
-                    if !current_delta.is_empty() {
-                        result.instructions.push(BFPCommand::Update(current_delta));
-                        current_delta = MachineDelta::new();
+                    if !machine_delta.is_empty() || !memory_delta.is_empty() {
+                        machine_delta.memory = memory_delta.into_iter().collect();
+                        result.instructions.push(BFPCommand::Update(machine_delta));
+                        machine_delta = MachineDelta::new();
+                        memory_delta = HashMap::new();
                     }
                     result.instructions.push(BFPCommand::Write);
                 },
                 BFCommand::Read => {
-                    if !current_delta.is_empty() {
-                        result.instructions.push(BFPCommand::Update(current_delta));
-                        current_delta = MachineDelta::new();
+                    if !machine_delta.is_empty() || !memory_delta.is_empty() {
+                        machine_delta.memory = memory_delta.into_iter().collect();
+                        result.instructions.push(BFPCommand::Update(machine_delta));
+                        machine_delta = MachineDelta::new();
+                        memory_delta = HashMap::new();
                     }
                     result.instructions.push(BFPCommand::Read);
                 },
                 BFCommand::Loop(body) => {
-                    if !current_delta.is_empty() {
-                        result.instructions.push(BFPCommand::Update(current_delta));
-                        current_delta = MachineDelta::new();
+                    if !machine_delta.is_empty() || !memory_delta.is_empty() {
+                        machine_delta.memory = memory_delta.into_iter().collect();
+                        result.instructions.push(BFPCommand::Update(machine_delta));
+                        machine_delta = MachineDelta::new();
+                        memory_delta = HashMap::new();
                     }
 
                     let optimized_body = BFPProgram::compile(body);
@@ -150,8 +157,9 @@ impl BFPProgram {
                 },
             }
         }
-        if !current_delta.is_empty() {
-            result.instructions.push(BFPCommand::Update(current_delta));
+        if !machine_delta.is_empty() || !memory_delta.is_empty() {
+            machine_delta.memory = memory_delta.into_iter().collect();
+            result.instructions.push(BFPCommand::Update(machine_delta));
         }
         result
     }
@@ -209,7 +217,7 @@ impl Machine {
         }
     }
 
-    fn run_bfp_multiply(self: &mut Machine, memory: &HashMap<i32, i8>) -> () {
+    fn run_bfp_multiply(self: &mut Machine, memory: &Vec<(i32, i8)>) -> () {
         let factor = self.memory[self.data_ptr] as i32;
         if factor > 0 {
             for (idx, val) in memory.iter() {
