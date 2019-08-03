@@ -25,6 +25,8 @@ enum BFCommand {
 enum BFPCommand {
     Update(MachineDelta),
     Multiply(Vec<(i32, i8)>),
+    MultiplySingle(i32, i8),
+    ZeroCell,
     Loop(BFPProgram),
     ScanZero(isize),
     Read,
@@ -142,8 +144,24 @@ impl BFPProgram {
 
                     let optimized_body = BFPProgram::compile(body);
                     match optimized_body.instructions.as_slice() {
-                        [BFPCommand::Update(MachineDelta { memory, data_ptr: 0 })] =>
-                            result.instructions.push(BFPCommand::Multiply(memory.into_iter().filter(|&(k, _)| *k != 0).map(|(k,v)| (*k,*v)).collect())),
+                        [BFPCommand::Update(MachineDelta { memory, data_ptr: 0 })] => {
+                            let mem: Vec<(i32, i8)> = memory
+                                .into_iter()
+                                .filter(|&(k, _)| *k != 0)
+                                .map(|(k,v)| (*k,*v))
+                                .collect();
+
+                            let instr = match mem.as_slice() {
+                                [] =>
+                                    BFPCommand::ZeroCell,
+                                [(offset, delta)] =>
+                                    BFPCommand::MultiplySingle(*offset, *delta),
+                                _ =>
+                                    BFPCommand::Multiply(mem)
+                            };
+
+                            result.instructions.push(instr);
+                        },
                         [BFPCommand::Update(MachineDelta { memory, data_ptr })] => {
                             if memory.is_empty() && *data_ptr != 0 {
                                 result.instructions.push(BFPCommand::ScanZero(*data_ptr));
@@ -198,6 +216,7 @@ impl Machine {
         Ok(())
     }
 
+    // #[inline(never)]
     fn run_bfp_update(self: &mut Machine, delta: &MachineDelta) -> () {
         if !delta.memory.is_empty() {
             for (idx, val) in delta.memory.iter() {
@@ -217,6 +236,7 @@ impl Machine {
         }
     }
 
+    // #[inline(never)]
     fn run_bfp_multiply(self: &mut Machine, memory: &Vec<(i32, i8)>) -> () {
         let factor = self.memory[self.data_ptr] as i32;
         if factor > 0 {
@@ -233,6 +253,19 @@ impl Machine {
         }
     }
 
+    // #[inline(never)]
+    fn run_bfp_multiply_single(self: &mut Machine, offset: i32, delta: i8) {
+        let factor = self.memory[self.data_ptr] as i32;
+        if factor > 0 {
+            let absolute_idx = self.data_ptr as isize + offset as isize;
+            let absolute_val = self.memory[absolute_idx as usize] as i32 + (delta as i32 * factor);
+            self.memory[absolute_idx as usize] = absolute_val as u8;
+            self.memory[self.data_ptr] = 0;
+        }
+    }
+
+
+    // #[inline(never)]
     fn run_bfp_loop(self: &mut Machine, body: &BFPProgram) -> io::Result<()> {
         while self.memory[self.data_ptr] != 0 {
             self.run_optimized(&body)?;
@@ -240,6 +273,7 @@ impl Machine {
         Ok(())
     }
 
+    // #[inline(never)]
     fn run_bfp_scanzero(self: &mut Machine, step: isize) {
         let mut data_ptr = self.data_ptr as isize;
         while self.memory[data_ptr as usize] != 0 {
@@ -248,19 +282,34 @@ impl Machine {
         self.data_ptr = data_ptr as usize;
     }
 
+    // #[inline(never)]
+    fn run_bfp_write(self: &mut Machine) {
+        io::stdout().write(&[self.memory[self.data_ptr]]);
+    }
+
+    // #[inline(never)]
+    fn run_bfp_read(self: &mut Machine) -> io::Result<()> {
+        let mut buf = vec![0];
+        io::stdin().read(&mut buf)?;
+        self.memory[self.data_ptr] = buf[0];
+        Ok(())
+    }
+
+    // #[inline(never)]
+    fn run_bfp_zero_cell(self: &mut Machine) {
+        self.memory[self.data_ptr] = 0;
+    }
+
+    // #[inline(never)]
     fn run_optimized(self: &mut Machine, program: &BFPProgram) -> io::Result<()> {
         for inst in &program.instructions {
             match inst {
                 BFPCommand::Update(delta) => self.run_bfp_update(delta),
                 BFPCommand::Multiply(memory) => self.run_bfp_multiply(memory),
-                BFPCommand::Write => {
-                    io::stdout().write(&[self.memory[self.data_ptr]])?;
-                },
-                BFPCommand::Read => {
-                    let mut buf = vec![0];
-                    io::stdin().read(&mut buf)?;
-                    self.memory[self.data_ptr] = buf[0];
-                },
+                BFPCommand::MultiplySingle(offset, delta) => self.run_bfp_multiply_single(*offset, *delta),
+                BFPCommand::ZeroCell => self.run_bfp_zero_cell(),
+                BFPCommand::Write => self.run_bfp_write(),
+                BFPCommand::Read => self.run_bfp_read()?,
                 BFPCommand::Loop(body) => self.run_bfp_loop(body)?,
                 BFPCommand::ScanZero(step) => self.run_bfp_scanzero(*step),
             }
