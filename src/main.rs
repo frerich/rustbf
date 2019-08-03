@@ -26,6 +26,7 @@ enum BFPCommand {
     Update(MachineDelta),
     Multiply(Vec<(i32, i8)>),
     MultiplySingle(i32, i8),
+    Shift(isize),
     ZeroCell,
     Loop(BFPProgram),
     ScanZero(isize),
@@ -118,8 +119,12 @@ impl BFPProgram {
                 BFCommand::Dec => *memory_delta.entry(machine_delta.data_ptr as i32).or_insert(0) -= 1,
                 BFCommand::Write => {
                     if !machine_delta.is_empty() || !memory_delta.is_empty() {
-                        machine_delta.memory = memory_delta.into_iter().collect();
-                        result.instructions.push(BFPCommand::Update(machine_delta));
+                        if memory_delta.is_empty() {
+                            result.instructions.push(BFPCommand::Shift(machine_delta.data_ptr));
+                        } else {
+                            machine_delta.memory = memory_delta.into_iter().collect();
+                            result.instructions.push(BFPCommand::Update(machine_delta));
+                        }
                         machine_delta = MachineDelta::new();
                         memory_delta = HashMap::new();
                     }
@@ -127,8 +132,12 @@ impl BFPProgram {
                 },
                 BFCommand::Read => {
                     if !machine_delta.is_empty() || !memory_delta.is_empty() {
-                        machine_delta.memory = memory_delta.into_iter().collect();
-                        result.instructions.push(BFPCommand::Update(machine_delta));
+                        if memory_delta.is_empty() {
+                            result.instructions.push(BFPCommand::Shift(machine_delta.data_ptr));
+                        } else {
+                            machine_delta.memory = memory_delta.into_iter().collect();
+                            result.instructions.push(BFPCommand::Update(machine_delta));
+                        }
                         machine_delta = MachineDelta::new();
                         memory_delta = HashMap::new();
                     }
@@ -136,8 +145,12 @@ impl BFPProgram {
                 },
                 BFCommand::Loop(body) => {
                     if !machine_delta.is_empty() || !memory_delta.is_empty() {
-                        machine_delta.memory = memory_delta.into_iter().collect();
-                        result.instructions.push(BFPCommand::Update(machine_delta));
+                        if memory_delta.is_empty() {
+                            result.instructions.push(BFPCommand::Shift(machine_delta.data_ptr));
+                        } else {
+                            machine_delta.memory = memory_delta.into_iter().collect();
+                            result.instructions.push(BFPCommand::Update(machine_delta));
+                        }
                         machine_delta = MachineDelta::new();
                         memory_delta = HashMap::new();
                     }
@@ -146,7 +159,7 @@ impl BFPProgram {
                     match optimized_body.instructions.as_slice() {
                         [BFPCommand::Update(MachineDelta { memory, data_ptr: 0 })] => {
                             let mem: Vec<(i32, i8)> = memory
-                                .into_iter()
+                                .iter()
                                 .filter(|&(k, _)| *k != 0)
                                 .map(|(k,v)| (*k,*v))
                                 .collect();
@@ -162,13 +175,8 @@ impl BFPProgram {
 
                             result.instructions.push(instr);
                         },
-                        [BFPCommand::Update(MachineDelta { memory, data_ptr })] => {
-                            if memory.is_empty() && *data_ptr != 0 {
-                                result.instructions.push(BFPCommand::ScanZero(*data_ptr));
-                            } else {
-                                result.instructions.push(BFPCommand::Loop(optimized_body));
-                            }
-                        },
+                        [BFPCommand::Shift(offset)] =>
+                            result.instructions.push(BFPCommand::ScanZero(*offset)),
                         _ =>
                             result.instructions.push(BFPCommand::Loop(optimized_body)),
                     }
@@ -176,8 +184,12 @@ impl BFPProgram {
             }
         }
         if !machine_delta.is_empty() || !memory_delta.is_empty() {
-            machine_delta.memory = memory_delta.into_iter().collect();
-            result.instructions.push(BFPCommand::Update(machine_delta));
+            if memory_delta.is_empty() {
+                result.instructions.push(BFPCommand::Shift(machine_delta.data_ptr));
+            } else {
+                machine_delta.memory = memory_delta.into_iter().collect();
+                result.instructions.push(BFPCommand::Update(machine_delta));
+            }
         }
         result
     }
@@ -199,11 +211,11 @@ impl Machine {
                 BFCommand::Inc => self.memory[self.data_ptr] += 1,
                 BFCommand::Dec => self.memory[self.data_ptr] -= 1,
                 BFCommand::Write => {
-                    io::stdout().write(&[self.memory[self.data_ptr]])?;
+                    io::stdout().write_all(&[self.memory[self.data_ptr]])?;
                 },
                 BFCommand::Read => {
                     let mut buf = vec![0];
-                    io::stdin().read(&mut buf)?;
+                    io::stdin().read_exact(&mut buf)?;
                     self.memory[self.data_ptr] = buf[0];
                 },
                 BFCommand::Loop(body) => {
@@ -217,7 +229,7 @@ impl Machine {
     }
 
     // #[inline(never)]
-    fn run_bfp_update(self: &mut Machine, delta: &MachineDelta) -> () {
+    fn run_bfp_update(self: &mut Machine, delta: &MachineDelta) {
         if !delta.memory.is_empty() {
             for (idx, val) in delta.memory.iter() {
                 let mut absolute_idx = self.data_ptr as i64;
@@ -237,7 +249,7 @@ impl Machine {
     }
 
     // #[inline(never)]
-    fn run_bfp_multiply(self: &mut Machine, memory: &Vec<(i32, i8)>) -> () {
+    fn run_bfp_multiply(self: &mut Machine, memory: &[(i32, i8)]) {
         let factor = self.memory[self.data_ptr] as i32;
         if factor > 0 {
             for (idx, val) in memory.iter() {
@@ -283,14 +295,14 @@ impl Machine {
     }
 
     // #[inline(never)]
-    fn run_bfp_write(self: &mut Machine) {
-        io::stdout().write(&[self.memory[self.data_ptr]]);
+    fn run_bfp_write(self: &mut Machine) -> io::Result<()> {
+        io::stdout().write_all(&[self.memory[self.data_ptr]])
     }
 
     // #[inline(never)]
     fn run_bfp_read(self: &mut Machine) -> io::Result<()> {
         let mut buf = vec![0];
-        io::stdin().read(&mut buf)?;
+        io::stdin().read_exact(&mut buf)?;
         self.memory[self.data_ptr] = buf[0];
         Ok(())
     }
@@ -301,6 +313,11 @@ impl Machine {
     }
 
     // #[inline(never)]
+    fn run_bfp_shift(self: &mut Machine, offset: isize) {
+        self.data_ptr = (self.data_ptr as isize + offset) as usize;
+    }
+
+    // #[inline(never)]
     fn run_optimized(self: &mut Machine, program: &BFPProgram) -> io::Result<()> {
         for inst in &program.instructions {
             match inst {
@@ -308,7 +325,8 @@ impl Machine {
                 BFPCommand::Multiply(memory) => self.run_bfp_multiply(memory),
                 BFPCommand::MultiplySingle(offset, delta) => self.run_bfp_multiply_single(*offset, *delta),
                 BFPCommand::ZeroCell => self.run_bfp_zero_cell(),
-                BFPCommand::Write => self.run_bfp_write(),
+                BFPCommand::Shift(offset) => self.run_bfp_shift(*offset),
+                BFPCommand::Write => self.run_bfp_write()?,
                 BFPCommand::Read => self.run_bfp_read()?,
                 BFPCommand::Loop(body) => self.run_bfp_loop(body)?,
                 BFPCommand::ScanZero(step) => self.run_bfp_scanzero(*step),
@@ -338,6 +356,7 @@ fn main() {
         Ok(program) => {
             let mut machine = Machine::new(65536);
             let optimized_program = BFPProgram::compile(&program);
+            // dbg!(optimized_program);
             machine.run_optimized(&optimized_program);
         }
     }
